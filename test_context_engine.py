@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """
-Automated test suite for antigravity-context-engine (12 test cases).
+Automated test suite for antigravity-context-engine (14 test cases).
 Validates:
-1. Read-only transcript indexing (read_file, write_file, edit_file digests).
+1. Read-only transcript indexing (read_file, write_file, edit_file digests + 100% complete flag).
 2. Refusal stripping (blocked/refused turns excluded from accepted continuity anchor).
 3. Stop hook updates snapshot and returns decision: allow.
 4. Normal same-model turn passes through with zero overhead.
 5. Automatic Model Switch detection (e.g. Flash -> Argon) injects cached files & anti-reread lock.
-6. Automatic Session Resume / Restart gap (>10m) injects snapshot.
-7. '.save <tag>' pins and tags the current conversation with UI banner.
-8. '.chats' renders the numbered snapshot table via metadata.user_markdown.
-9. '.carry 1' (by table row number) carries snapshot into a new conversation.
-10. '.carry <tag>' (by saved tag name) carries snapshot into a new conversation.
-11. '.carry <short_id>' (by conversation ID prefix) carries snapshot into a new conversation.
-12. '.sync' / '.compact' forces an immediate local refresh & injection without cloud API calls.
+6. Automatic Session Resume / Restart gap (>3m) injects snapshot.
+7. '.save <tag>' pins, tags, and arms the current conversation with UI banner.
+8. Same-Chat '.save' auto-restores on the very next turn even 1 second later without typing '.carry'.
+9. Immediate Antigravity App Restart detection (host process PID change, <1s gap) auto-restores Same-Chat.
+10. '.chats' renders the numbered snapshot table via metadata.user_markdown.
+11. '.carry 1' (by table row number) carries snapshot into a new conversation.
+12. '.carry <tag>' (by saved tag name) carries snapshot into a new conversation.
+13. '.carry <short_id>' (by conversation ID prefix) carries snapshot into a new conversation.
+14. '.sync' / '.compact' forces an immediate local refresh & injection without cloud API calls.
 """
 
 import os
@@ -30,9 +32,10 @@ PRE_SCRIPT = PLUGIN_DIR / "context_pre.py"
 STOP_SCRIPT = PLUGIN_DIR / "context_stop.py"
 
 
-def run_hook(script_path: Path, payload: dict, store_dir: Path) -> dict:
+def run_hook(script_path: Path, payload: dict, store_dir: Path, host_sig: str = "antigravity.exe:1001") -> dict:
     env = dict(os.environ)
     env["AGY_CONTEXT_STORE_DIR"] = str(store_dir)
+    env["AGY_HOST_SIGNATURE"] = host_sig
     proc = subprocess.run(
         [sys.executable, str(script_path)],
         input=json.dumps(payload),
@@ -115,9 +118,10 @@ def test_suite():
         snap = json.loads(snap_file.read_text(encoding="utf-8"))
 
         assert "D:/project/rules.py" in snap["files"]
+        assert snap["files"]["D:/project/rules.py"]["isComplete"] is True
         assert "D:/project/chapter1.md" in snap["files"]
         assert "validate_scene" in snap["files"]["D:/project/rules.py"]["digest"]
-        print("  [PASS] Case 1: Read-only transcript indexer caches read_file & write_file digests")
+        print("  [PASS] Case 1: Read-only transcript indexer caches full 100% file digests")
 
         for turn in snap["accepted_turns"]:
             assert "blocked by Gemini's filters" not in turn["text"]
@@ -125,7 +129,7 @@ def test_suite():
         print("  [PASS] Case 2: Refusal/filter-blocked turns are stripped from Accepted Continuity Anchor")
         print("  [PASS] Case 3: Stop hook updates snapshot and returns decision=allow")
 
-        # Case 4: Normal turn with same model and recent timestamp -> zero-overhead pass-through
+        # Case 4: Normal turn with same model, same host PID, and recent timestamp -> zero-overhead pass-through
         res_normal = run_hook(
             PRE_SCRIPT,
             {
@@ -157,13 +161,14 @@ def test_suite():
         assert len(res_argon.get("injectSteps", [])) == 1
         sys_msg = res_argon["injectSteps"][0]["systemMessage"]["systemMessage"]
         user_md = res_argon["injectSteps"][0]["systemMessage"]["metadata"]["user_markdown"]
-        assert "ARGON ANTI-REREAD LOCK" in sys_msg
+        assert "100% COMPLETE CONTENT CACHED — DO NOT CALL read_file" in sys_msg
         assert "D:/project/rules.py" in sys_msg
         assert "Model Switch" in user_md
-        print("  [PASS] Case 5: Model switch to Argon auto-injects cached files & anti-reread lock")
+        print("  [PASS] Case 5: Model switch to Argon auto-injects 100% cached files & anti-reread lock")
 
-        # Case 6: App restart / >10m idle gap -> auto-injects snapshot
-        snap["updatedEpoch"] = time.time() - 1200  # 20 minutes ago
+        # Case 6: Idle gap (>3m) -> auto-injects snapshot
+        snap = json.loads(snap_file.read_text(encoding="utf-8"))
+        snap["updatedEpoch"] = time.time() - 300
         snap["lastModelName"] = "gemini-4-argon"
         snap_file.write_text(json.dumps(snap), encoding="utf-8")
 
@@ -181,9 +186,9 @@ def test_suite():
         )
         assert len(res_restart.get("injectSteps", [])) == 1
         assert "Session Resume" in res_restart["injectSteps"][0]["systemMessage"]["metadata"]["user_markdown"]
-        print("  [PASS] Case 6: Post-restart idle gap (>10m) auto-injects session snapshot")
+        print("  [PASS] Case 6: Idle gap (>3m) auto-injects session snapshot")
 
-        # Case 7: '.save story' tags and pins the conversation
+        # Case 7: '.save story' tags, pins, and arms the conversation
         res_save = run_hook(
             PRE_SCRIPT,
             {
@@ -198,9 +203,45 @@ def test_suite():
         )
         assert len(res_save.get("injectSteps", [])) == 1
         assert "story" in res_save["injectSteps"][0]["systemMessage"]["metadata"]["user_markdown"]
-        print("  [PASS] Case 7: '.save story' pins and tags the conversation with UI confirmation")
+        print("  [PASS] Case 7: '.save story' pins, tags, and arms the conversation")
 
-        # Case 8: '.chats' renders numbered markdown table of saved snapshots
+        # Case 8: Same-Chat next message after '.save' auto-injects immediately (even 0s later!)
+        res_same_after_save = run_hook(
+            PRE_SCRIPT,
+            {
+                "conversationId": "fd4cfb71-d5b7-4c71-bd30-b136d3418163",
+                "workspacePaths": ["D:/project/story-workspace"],
+                "transcriptPath": str(tpath),
+                "modelName": "gemini-4-argon",
+                "lastUserInput": "Write the next paragraph now",
+                "invocationNum": 1,
+            },
+            store_dir,
+        )
+        assert len(res_same_after_save.get("injectSteps", [])) == 1
+        assert "Armed `.save` Snapshot Restored" in res_same_after_save["injectSteps"][0]["systemMessage"]["metadata"]["user_markdown"]
+        assert "D:/project/chapter1.md" in res_same_after_save["injectSteps"][0]["systemMessage"]["systemMessage"]
+        print("  [PASS] Case 8: Same-chat after '.save' auto-restores full snapshot on next message")
+
+        # Case 9: Closing & reopening Antigravity (new host process PID, <1s later) auto-restores Same-Chat
+        res_app_restart = run_hook(
+            PRE_SCRIPT,
+            {
+                "conversationId": "fd4cfb71-d5b7-4c71-bd30-b136d3418163",
+                "workspacePaths": ["D:/project/story-workspace"],
+                "transcriptPath": str(tpath),
+                "modelName": "gemini-4-argon",
+                "lastUserInput": "Continue right after reopening Antigravity",
+                "invocationNum": 1,
+            },
+            store_dir,
+            host_sig="antigravity.exe:2099",  # New PID after reopening Antigravity
+        )
+        assert len(res_app_restart.get("injectSteps", [])) == 1
+        assert "Antigravity App Restart Detected" in res_app_restart["injectSteps"][0]["systemMessage"]["metadata"]["user_markdown"]
+        print("  [PASS] Case 9: Closing & reopening Antigravity (new host PID) auto-restores Same-Chat immediately")
+
+        # Case 10: '.chats' renders numbered markdown table of saved snapshots
         res_chats = run_hook(
             PRE_SCRIPT,
             {
@@ -215,9 +256,9 @@ def test_suite():
         assert "Available Snapshots" in chats_md
         assert "fd4cfb71" in chats_md
         assert "story" in chats_md
-        print("  [PASS] Case 8: '.chats' renders numbered snapshot table with IDs, tags, and previews")
+        print("  [PASS] Case 10: '.chats' renders numbered snapshot table with IDs, tags, and previews")
 
-        # Case 9: '.carry 1' (by number) in a brand-new conversation
+        # Case 11: '.carry 1' (by number) in a brand-new conversation
         res_carry_num = run_hook(
             PRE_SCRIPT,
             {
@@ -234,9 +275,9 @@ def test_suite():
         assert "write chapter 2" in carry_sys
         assert "Carried Forward" in carry_md
         assert "fd4cfb71" in carry_md
-        print("  [PASS] Case 9: '.carry 1' carries context by table number into a new chat")
+        print("  [PASS] Case 11: '.carry 1' carries context by table number into a new chat")
 
-        # Case 10: '.carry story' (by custom tag)
+        # Case 12: '.carry story' (by custom tag)
         res_carry_tag = run_hook(
             PRE_SCRIPT,
             {
@@ -248,9 +289,9 @@ def test_suite():
             store_dir,
         )
         assert "D:/project/rules.py" in res_carry_tag["injectSteps"][0]["systemMessage"]["systemMessage"]
-        print("  [PASS] Case 10: '.carry <tag>' carries context by friendly tag name")
+        print("  [PASS] Case 12: '.carry <tag>' carries context by friendly tag name")
 
-        # Case 11: '.carry fd4cfb71' (by short conversation ID)
+        # Case 13: '.carry fd4cfb71' (by short conversation ID)
         res_carry_id = run_hook(
             PRE_SCRIPT,
             {
@@ -262,9 +303,9 @@ def test_suite():
             store_dir,
         )
         assert "D:/project/rules.py" in res_carry_id["injectSteps"][0]["systemMessage"]["systemMessage"]
-        print("  [PASS] Case 11: '.carry <short_id>' carries context by conversation ID prefix")
+        print("  [PASS] Case 13: '.carry <short_id>' carries context by conversation ID prefix")
 
-        # Case 12: '.sync' / '.compact' forces local refresh without cloud API calls
+        # Case 14: '.sync' / '.compact' forces local refresh without cloud API calls
         res_sync = run_hook(
             PRE_SCRIPT,
             {
@@ -278,9 +319,9 @@ def test_suite():
             store_dir,
         )
         assert "Manual Local Sync" in res_sync["injectSteps"][0]["systemMessage"]["metadata"]["user_markdown"]
-        print("  [PASS] Case 12: '.sync' / '.compact' performs 100% local refresh and injection")
+        print("  [PASS] Case 14: '.sync' / '.compact' performs 100% local refresh and injection")
 
-        print("\nALL 12 CONTEXT ENGINE TESTS PASSED SUCCESSFULLY.")
+        print("\nALL 14 CONTEXT ENGINE TESTS PASSED SUCCESSFULLY.")
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 

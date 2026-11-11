@@ -27,7 +27,7 @@ Clone https://github.com/revolverocelot1/antigravity-context-engine into:
 - Windows: %USERPROFILE%\.gemini\config\plugins\antigravity-context-engine
 - Mac/Linux: ~/.gemini/config/plugins/antigravity-context-engine
 
-Then run python test_context_engine.py and confirm all 12 tests pass.
+Then run python test_context_engine.py and confirm all 14 tests pass.
 ```
 
 Or manually:
@@ -70,7 +70,7 @@ Every time context is carried or synced, Antigravity displays a visual banner ri
 python test_context_engine.py
 ```
 
-Runs 12 automated test cases verifying read-only transcript parsing, refusal stripping, Argon model-switch detection, restart gap detection, `.chats`, `.save`, `.carry`, and `.sync`.
+Runs 14 automated test cases verifying read-only transcript parsing, refusal stripping, Argon model-switch detection, host-PID app restart detection, `.save` auto-arming, `.chats`, `.carry`, and `.sync`.
 
 ---
 
