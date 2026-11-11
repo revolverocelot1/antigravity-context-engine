@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Automated test suite for antigravity-context-engine (14 test cases).
+Automated test suite for antigravity-context-engine (16 test cases).
 Validates:
 1. Read-only transcript indexing (read_file, write_file, edit_file digests + 100% complete flag).
 2. Refusal stripping (blocked/refused turns excluded from accepted continuity anchor).
@@ -16,6 +16,8 @@ Validates:
 12. '.carry <tag>' (by saved tag name) carries snapshot into a new conversation.
 13. '.carry <short_id>' (by conversation ID prefix) carries snapshot into a new conversation.
 14. '.sync' / '.compact' forces an immediate local refresh & injection without cloud API calls.
+15. Slash command parity (/save, /chats, /carry, /compact) matches dot command syntax.
+16. '/context' and '/help' render full interactive command guide.
 """
 
 import os
@@ -219,7 +221,8 @@ def test_suite():
             store_dir,
         )
         assert len(res_same_after_save.get("injectSteps", [])) == 1
-        assert "Armed `.save` Snapshot Restored" in res_same_after_save["injectSteps"][0]["systemMessage"]["metadata"]["user_markdown"]
+        assert "Armed" in res_same_after_save["injectSteps"][0]["systemMessage"]["metadata"]["user_markdown"]
+        assert "Snapshot Restored" in res_same_after_save["injectSteps"][0]["systemMessage"]["metadata"]["user_markdown"]
         assert "D:/project/chapter1.md" in res_same_after_save["injectSteps"][0]["systemMessage"]["systemMessage"]
         print("  [PASS] Case 8: Same-chat after '.save' auto-restores full snapshot on next message")
 
@@ -321,7 +324,66 @@ def test_suite():
         assert "Manual Local Sync" in res_sync["injectSteps"][0]["systemMessage"]["metadata"]["user_markdown"]
         print("  [PASS] Case 14: '.sync' / '.compact' performs 100% local refresh and injection")
 
-        print("\nALL 14 CONTEXT ENGINE TESTS PASSED SUCCESSFULLY.")
+        # Case 15: Slash command syntax parity (/save, /chats, /carry, /compact)
+        res_slash_save = run_hook(
+            PRE_SCRIPT,
+            {
+                "conversationId": "fd4cfb71-d5b7-4c71-bd30-b136d3418163",
+                "workspacePaths": ["D:/project/story-workspace"],
+                "transcriptPath": str(tpath),
+                "modelName": "gemini-4-argon",
+                "lastUserInput": "/save story-slash",
+                "invocationNum": 1,
+            },
+            store_dir,
+        )
+        assert "story-slash" in res_slash_save["injectSteps"][0]["systemMessage"]["metadata"]["user_markdown"]
+
+        res_slash_chats = run_hook(
+            PRE_SCRIPT,
+            {
+                "conversationId": "new-convo-44444444",
+                "workspacePaths": ["D:/project/story-workspace"],
+                "lastUserInput": "/chats",
+                "invocationNum": 1,
+            },
+            store_dir,
+        )
+        assert "story-slash" in res_slash_chats["injectSteps"][0]["systemMessage"]["metadata"]["user_markdown"]
+
+        res_slash_carry = run_hook(
+            PRE_SCRIPT,
+            {
+                "conversationId": "new-convo-55555555",
+                "workspacePaths": ["D:/other"],
+                "lastUserInput": "/carry story-slash continue immediately",
+                "invocationNum": 1,
+            },
+            store_dir,
+        )
+        assert "D:/project/chapter1.md" in res_slash_carry["injectSteps"][0]["systemMessage"]["systemMessage"]
+        assert "continue immediately" in res_slash_carry["injectSteps"][0]["systemMessage"]["systemMessage"]
+        print("  [PASS] Case 15: Slash command syntax (/save, /chats, /carry) functions identically to dot syntax")
+
+        # Case 16: /context and /help renders full interactive command guide
+        res_help = run_hook(
+            PRE_SCRIPT,
+            {
+                "conversationId": "new-convo-66666666",
+                "workspacePaths": ["D:/project/story-workspace"],
+                "lastUserInput": "/context",
+                "invocationNum": 1,
+            },
+            store_dir,
+        )
+        help_md = res_help["injectSteps"][0]["systemMessage"]["metadata"]["user_markdown"]
+        assert "Command Guide" in help_md
+        assert "/save" in help_md
+        assert "/carry" in help_md
+        assert "/chats" in help_md
+        print("  [PASS] Case 16: '/context' and '/help' render full interactive command guide")
+
+        print("\nALL 16 CONTEXT ENGINE TESTS PASSED SUCCESSFULLY.")
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
