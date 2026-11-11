@@ -1,0 +1,8 @@
+{
+  "name": "antigravity-context-engine",
+  "version": "1.0.0",
+  "description": "Zero-API local context indexer, Argon anti-reread lock, and cross-chat continuity engine for Antigravity.",
+  "author": "revolverocelot1",
+  "repository": "https://github.com/revolverocelot1/antigravity-context-engine",
+  "disabled": false
+}
